@@ -1,0 +1,77 @@
+KeRRA DAILY REPORT APP
+======================
+Version 1.0 - Daily progress report / site diary
+Release date: 25 October 2026
+
+WHAT IT DOES
+------------
+Builds the Kenya Rural Roads Authority "Daily Progress Report / Site Diary" as a Word (.docx) file,
+laid out like the sample report of 17/09/2026: logo and title on every page, sections I to X,
+"Page | n" footer, A4, Times New Roman.
+
+The app layout follows the Infras structural calculations app: a Home tab with cards and a four-step
+guide, then a working tab with numbered sections, a check, the download and a saved file.
+
+SECTIONS (same order as the sample)
+-----------------------------------
+ Project block   Project name, contract no., contractor, date
+ I.    Weather conditions   station, morning / afternoon, rainfall by location, ground, max / min temperature
+ II.   Activities           operation, chainage from / to, previous / today / total length, remark
+ III.  Contractor's equipment / machinery on site
+ IV.   Visitors
+ V.    Contractor's labour force   (with a total)
+ VI.   Materials delivered
+ VII.  Accidents, delays & problems
+ VIII. Resident Engineer's supervision vehicles
+ IX.   Resident Engineer's staff activities
+ X.    Progress photos (any number, each with a caption)
+
+THINGS THE APP DOES FOR YOU
+---------------------------
+ - Activities: leave "Today (m)" empty and the length is worked out from the chainages
+   (2+260 to 2+660 = 400 m). Total = previous + today.
+ - Equipment and labour start filled in with the lists from the 17/09/2026 report - edit, add or delete rows.
+ - Check section: counts, and warnings for empty project details, bad chainages, missing photos, etc.
+ - Save and carry forward: "Download saved report (.json)" keeps everything except the photos.
+   Next day, open it under "Start from a saved report" and choose
+     * "Reopen it to edit"            - to correct the same report, or
+     * "Start the next day's report"  - date + 1 day; plant, labour, vehicles and teams kept;
+                                        previous length = yesterday's total; weather, rainfall, today's work,
+                                        materials, delays and photos cleared.
+
+DIFFERENCES FROM THE SAMPLE REPORT (deliberate)
+-----------------------------------------------
+ - Visitors default to "Nil" (the sample shows "NI").
+ - Names are written as typed (the sample mixes capital and small letters).
+ - A total row is added to the labour force table.
+ - The section X heading reads "PROGRESS PHOTOS" when more than one photo is attached.
+ - Rainfall is written as "Location: value mm".
+ - Column widths were adjusted so headings such as TODAY and QTY do not break across lines.
+
+PLEASE CHECK / LIMITATIONS
+--------------------------
+ - The Word file was checked by converting it to PDF with LibreOffice and with a Word-format validator.
+   It was not opened in Microsoft Word itself - open one report and check it before relying on it.
+ - The double rule under the title is set as in the sample; some viewers show it as one thick line.
+ - Photos are not stored in the saved file - add them again when reopening.
+ - The weather and equipment-status choices are suggestions - change them if KeRRA uses fixed wording.
+ - Not tried on a Windows PC; the first run needs internet once.
+
+FILES (keep them all in ONE folder)
+-----------------------------------
+ app.py                    start-up file, Home page and the Daily report tab
+ version.py                version number (shown on the Home page)
+ report_data.py            defaults, chainage maths, save / reopen / carry-forward
+ report_docx.py            builds the Word report
+ logo.png                  KeRRA logo (header of every page and Home page)
+ requirements.txt          Python packages (streamlit, python-docx, pillow, pandas)
+ run_daily_report_app.bat  Windows launcher (double-click to start the app)
+ .streamlit\config.toml    green colour theme
+ samples\                  a report made by the app for 17/09/2026 and its saved file
+
+HOW TO INSTALL
+--------------
+ 1. Copy the whole folder to the PC.
+ 2. Double-click run_daily_report_app.bat. The first time it sets itself up (internet needed once).
+ For Streamlit Community Cloud: upload all the .py files, logo.png, requirements.txt and the .streamlit
+ folder to your GitHub repository.
