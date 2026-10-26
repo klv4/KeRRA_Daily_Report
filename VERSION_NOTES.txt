@@ -1,7 +1,28 @@
 KeRRA DAILY REPORT APP
 ======================
-Version 1.0 - Daily progress report / site diary
-Release date: 25 October 2026
+Version 1.1 - Daily progress report / site diary
+Release date: 26 October 2026
+
+WHAT CHANGED IN 1.1
+-------------------
+ 1. Project: new "Road length (m)". It builds the chainage dropdowns 0+000, 0+020 ... to the road length.
+    The dropdowns are used for Station (weather) and Chainage from / to (activities).
+ 2. Ground conditions: Good, Bad, Wet, Dry only.
+ 3. Rainfall: two fixed rows, location dropdown (Wahambla site (:0+854) km, Majiwa sec. school(9+000)km) + mm.
+ 4. Activities: operation dropdown (your list), new Side column (RHS / LHS) joined to the chainage in the report
+    ("2+370 RHS"; with both chainages, both cells carry it).
+ 5. Equipment: From / To dropdowns (12:00 am ... 11:00 pm, defaults 8:00 am / 5:00 pm kept);
+    Status: Working / Not working only.
+ 6. Labour force: From / To time dropdowns.
+ 7. Materials: separate Unit column (pcs, m3, kg, m, trucks); quantity and unit are joined in the report ("120 bags").
+ 8. Supervision vehicles: KDV 984 M / Field / Updated / Good / Working is the default first row.
+ 9. Progress photos: one upload box per activity, captions made automatically ("Figure 1: Rock fill 3+000 to 3+120 LHS"),
+    two photos per row in a bordered grid, all photos cut to the same 4:3 size and centred, caption block centred with
+    the text left aligned. A new row is added only when there are more photos. "Other photos" has its own caption.
+10. Dropdowns that are not fixed take a new typed value, add it to the list and remember it in lists.json
+    (created next to app.py). Fixed lists: ground conditions, status, side.
+    Dropdown tables are now one row of widgets per line (a spreadsheet-style table cannot take typed values),
+    so the page is wide and each row has a delete (x) button, with "+ Add ..." under each table.
 
 WHAT IT DOES
 ------------
@@ -54,6 +75,9 @@ PLEASE CHECK / LIMITATIONS
    It was not opened in Microsoft Word itself - open one report and check it before relying on it.
  - The double rule under the title is set as in the sample; some viewers show it as one thick line.
  - Photos are not stored in the saved file - add them again when reopening.
+ - Photos are cut (centre crop) to 4:3, so a portrait photo loses its top and bottom.
+ - The caption is a centred indented paragraph, not a Word text box (it looks the same and moves with the cell).
+ - 'Earthworks; cut to fill' is kept as one name, as typed. 'Subbase stabilisation' is not in your list - type it once.
  - The weather and equipment-status choices are suggestions - change them if KeRRA uses fixed wording.
  - Not tried on a Windows PC; the first run needs internet once.
 
@@ -63,6 +87,7 @@ FILES (keep them all in ONE folder)
  version.py                version number (shown on the Home page)
  report_data.py            defaults, chainage maths, save / reopen / carry-forward
  report_docx.py            builds the Word report
+ lists.json                created by the app: the dropdown lists you have added to
  logo.png                  KeRRA logo (header of every page and Home page)
  requirements.txt          Python packages (streamlit, python-docx, pillow, pandas)
  run_daily_report_app.bat  Windows launcher (double-click to start the app)

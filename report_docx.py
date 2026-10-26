@@ -48,21 +48,24 @@ def _fmt(p, align=None, before=0, after=0, keep_next=False):
         pf.keep_with_next = True
 
 
-def _field(par, code, size=10, name="Arial"):
-    run = par.add_run()
-    _font(run, size, name=name)
-    for t, txt in (("begin", None), (None, code), ("separate", None), ("text", "1"), ("end", None)):
-        if t in ("begin", "separate", "end"):
+def _field(par, code, size=10, name="Arial", cached="1", italic=None, color=None):
+    """A Word field (PAGE, SEQ ...). Each part is its own run so the font applies to the displayed result."""
+    def run_with(child):
+        r = par.add_run()
+        _font(r, size, name=name, italic=italic, color=color)
+        r._r.append(child)
+    for kind in ("begin", "code", "separate", "text", "end"):
+        if kind in ("begin", "separate", "end"):
             e = OxmlElement("w:fldChar")
-            e.set(qn("w:fldCharType"), t)
-        elif t is None:
+            e.set(qn("w:fldCharType"), kind)
+        elif kind == "code":
             e = OxmlElement("w:instrText")
             e.set(qn("xml:space"), "preserve")
-            e.text = f" {txt} "
+            e.text = f" {code} "
         else:
             e = OxmlElement("w:t")
-            e.text = txt
-        run._r.append(e)
+            e.text = cached
+        run_with(e)
 
 
 def _border_bottom(p, val="thinThickSmallGap", sz=24):
@@ -145,15 +148,58 @@ def _grid_table(doc, widths, headers, rows, size=10.5, aligns=None, min_rows=0, 
 
 
 # ------------------------------------------------------------------ photo handling
-def _prepare_photo(raw, max_px=1600):
-    img = Image.open(io.BytesIO(raw))
-    img = ImageOps.exif_transpose(img).convert("RGB")
-    if img.width > max_px:
-        img = img.resize((max_px, round(img.height * max_px / img.width)))
+PHOTO_W, PHOTO_H = 2.9, 2.175          # inches - every photo is cut to this same 4:3 size
+CAPTION_W = 2.2                         # inches - width of the caption block
+CAPTION_BLUE = RGBColor(0x1F, 0x49, 0x7D)
+PHOTO_ROW_MIN_H = 3.1                   # inches - minimum row height (as in the sample report)
+
+
+def _prepare_photo(raw, px_w=1200):
+    """Turn any photo into the same-size picture: upright (EXIF), centre-cropped to 4:3, 1200 x 900 px."""
+    img = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+    img = ImageOps.fit(img, (px_w, round(px_w * PHOTO_H / PHOTO_W)), method=Image.LANCZOS, centering=(0.5, 0.5))
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=85)
     buf.seek(0)
-    return buf, img.width, img.height
+    return buf
+
+
+def _photo_cell(cell, raw, caption, number):
+    cell.text = ""
+    p = cell.paragraphs[0]
+    _fmt(p, C, 2, 4, keep_next=True)
+    p.add_run().add_picture(_prepare_photo(raw), width=Inches(PHOTO_W), height=Inches(PHOTO_H))
+    # caption: the block is centred in the cell, the text inside it is left aligned
+    cp = cell.add_paragraph()
+    _fmt(cp, L, 0, 4)
+    side = (PHOTO_W - CAPTION_W) / 2 + 0.04
+    cp.paragraph_format.left_indent = Inches(side)
+    cp.paragraph_format.right_indent = Inches(side)
+    _font(cp.add_run("Figure "), 9, italic=True, color=CAPTION_BLUE, name="Calibri")
+    _field(cp, "SEQ Figure \\* ARABIC", size=9, name="Calibri", cached=str(number), italic=True, color=CAPTION_BLUE)
+    _font(cp.add_run(f": {caption}"), 9, italic=True, color=CAPTION_BLUE, name="Calibri")
+
+
+def _photo_table(doc, photos):
+    w = [CONTENT_W / 2, CONTENT_W / 2]
+    t = _table(doc, w)
+    n = 0
+    for start in range(0, len(photos), 2):                 # a new row only when there are more photos
+        row = _add_row(t, w)
+        trPr = row._tr.get_or_add_trPr()
+        h = OxmlElement("w:trHeight")
+        h.set(qn("w:val"), str(int(PHOTO_ROW_MIN_H * 1440)))
+        h.set(qn("w:hRule"), "atLeast")
+        trPr.append(h)
+        for ci in range(2):
+            cell = row.cells[ci]
+            if start + ci < len(photos):
+                n += 1
+                raw, cap = photos[start + ci]
+                _photo_cell(cell, raw, cap, n)
+            else:
+                cell.text = ""
+            cell.width = Inches(w[ci])
 
 
 # ------------------------------------------------------------------ the report
@@ -216,8 +262,8 @@ def build_report(st, photos=None, logo_path=None):
     _heading(doc, "I", "WEATHER CONDITIONS")
     w = [1.75, 0.95, 3.57]
     t = _table(doc, w)
-    station = f"{st['station_from']} TO {st['station_to']}".strip() if (st["station_from"] or st["station_to"]) else ""
-    rain = [f"{r[0]}: {r[1]} mm" if r[1] else r[0] for r in rd.clean_rows(st["rainfall"])]
+    station = f"{st['station_from'] or ''} TO {st['station_to'] or ''}".strip() if (st["station_from"] or st["station_to"]) else ""
+    rain = [f"{r[0]}:{r[1]} mm" for r in rd.clean_rows(st["rainfall"]) if r[1] != ""]
     rows = [("STATION", station), ("MORNING", st["morning"]), ("AFTERNOON", st["afternoon"]),
             ("RAINFALL (mm)", "\n".join(rain) if rain else "Nil"), ("GROUND CONDITIONS", st["ground"])]
     for label, val in rows:
@@ -234,7 +280,7 @@ def build_report(st, photos=None, logo_path=None):
 
     # ---- II. activities
     _heading(doc, "II", "ACTIVITIES")
-    w = [0.45, 1.5, 0.7, 0.7, 0.55, 0.72, 0.65, 1.0]
+    w = [0.45, 1.3, 0.8, 0.8, 0.6, 0.7, 0.65, 0.97]
     t = _table(doc, w)
     h1, h2 = _add_row(t, w, True), _add_row(t, w, True)
     for i in (0, 1, 7):
@@ -243,12 +289,12 @@ def build_report(st, photos=None, logo_path=None):
     _set_cell(h1.cells[2].merge(h1.cells[3]), "CHAINAGE", 10, True, align=C)
     _set_cell(h1.cells[4].merge(h1.cells[6]), "LENGTH (m)", 10, True, align=C)
     for i, txt in zip(range(2, 7), ["FROM", "TO", "PREV.", "TODAY", "TOTAL"]):
-        _set_cell(h2.cells[i], txt, 10, True, align=C, width=w[i])
+        _set_cell(h2.cells[i], txt, 9.5, True, align=C, width=w[i])
     acts = rd.activity_rows(st["activities"])
     for i in range(max(len(acts), 2)):
         r = _add_row(t, w)
         a = acts[i] if i < len(acts) else None
-        vals = [f"{i + 1}" if a else "", a["op"] if a else "", a["from"] if a else "", a["to"] if a else "",
+        vals = [f"{i + 1}" if a else "", a["op"] if a else "", a["from_txt"] if a else "", a["to_txt"] if a else "",
                 rd.fmt_num(a["prev"]) if a else "", rd.fmt_num(a["today"]) if a else "",
                 rd.fmt_num(a["total"]) if a else "", a["remark"] if a else ""]
         for c, v, ww, al in zip(r.cells, vals, w, [R, L, C, C, C, C, C, L]):
@@ -314,9 +360,9 @@ def build_report(st, photos=None, logo_path=None):
     _set_cell(r.cells[1], "TOTAL QUANTITY DELIVERED", 11, True, align=C, width=w[1])
     for i in range(max(len(mats), 3)):
         r = _add_row(t, w)
-        v = mats[i] if i < len(mats) else ["", ""]
+        v = mats[i] if i < len(mats) else ["", "", ""]
         _set_cell(r.cells[0], v[0], 11, width=w[0])
-        _set_cell(r.cells[1], v[1], 11, width=w[1])
+        _set_cell(r.cells[1], f"{v[1]} {v[2]}".strip(), 11, width=w[1])
 
     # ---- VII. accidents, delays & problems
     _heading(doc, "VII", "ACCIDENTS, DELAYS & PROBLEMS")
@@ -340,21 +386,12 @@ def build_report(st, photos=None, logo_path=None):
     _grid_table(doc, [0.55, 1.5, 4.22], ["S/NO.", "TEAM", "ACTIVITY"],
                 rd.clean_rows(st["staff"]), 11, [R, L, L], min_rows=3)
 
-    # ---- X. photos
+    # ---- X. photos: two per row, centred in bordered cells, "Figure n: caption" under each photo
     photos = photos or []
     _heading(doc, "X", "PROGRESS PHOTO" + ("S" if len(photos) > 1 else ""))
-    max_w, max_h = 5.6, 4.0
-    for raw, caption in photos:
-        buf, pw, ph = _prepare_photo(raw)
-        wi = min(max_w, max_h * pw / ph)
-        p = doc.add_paragraph()
-        _fmt(p, L, 2, 2, keep_next=True)
-        p.add_run().add_picture(buf, width=Inches(wi))
-        if caption:
-            cp = doc.add_paragraph()
-            _fmt(cp, L, 0, 10)
-            _font(cp.add_run(caption), 12)
-    if not photos:
+    if photos:
+        _photo_table(doc, photos)
+    else:
         p = doc.add_paragraph()
         _fmt(p, L)
         _font(p.add_run("No photos attached."), 12, italic=True)

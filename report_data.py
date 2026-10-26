@@ -14,24 +14,64 @@ import pandas as pd
 
 # ------------------------------------------------------------------ choices
 WEATHER_OPTIONS = ["Sunny", "Partly cloudy", "Cloudy", "Overcast", "Light rain", "Rain", "Heavy rain", "Windy", "Foggy"]
-GROUND_OPTIONS = ["Good", "Fair", "Damp", "Wet", "Muddy", "Waterlogged"]
-STATUS_OPTIONS = ["Working", "Idle", "Standby", "Breakdown", "Under repair", "Left site"]
+GROUND_OPTIONS = ["Good", "Bad", "Wet", "Dry"]                      # fixed list
+STATUS_OPTIONS = ["Working", "Not working"]                         # fixed list
+SIDE_OPTIONS = ["RHS", "LHS"]                                       # fixed list
+RAIN_LOCATIONS = ["Wahambla site (:0+854) km", "Majiwa sec. school(9+000)km"]
+ACTIVITY_OPTIONS = ["Embankment fill", "Removal of existing culvert", "Site clearance", "Excavation of culverts",
+                    "Earthworks; cut to fill", "Concrete casting", "Bed casting & BRC", "Rock fill",
+                    "Casting of access culvert", "TSG", "BSG", "Base cement stabilization", "Cut to spoil"]
+UNIT_OPTIONS = ["pcs", "m3", "kg", "m", "trucks"]
+TIME_OPTIONS = [f"{h % 12 or 12}:00 {'am' if h < 12 else 'pm'}" for h in range(24)]
+CHAINAGE_STEP = 20                                                  # metres between chainages in the dropdown
+
+# the lists that grow when a new value is typed (saved in lists.json next to the app)
+GROWING_LISTS = {"activity": ACTIVITY_OPTIONS, "unit": UNIT_OPTIONS, "time": TIME_OPTIONS,
+                 "weather": WEATHER_OPTIONS, "rainloc": RAIN_LOCATIONS, "extra_chainage": []}
 
 # ------------------------------------------------------------------ table columns
-ACT_COLS = ["Operation", "Chainage from", "Chainage to", "Previous (m)", "Today (m)", "Remark / status"]
+ACT_COLS = ["Operation", "Chainage from", "Chainage to", "Side", "Previous (m)", "Today (m)", "Remark / status"]
 EQ_COLS = ["Equipment / machinery", "Qty", "Reg. no.", "From", "To", "Idle hours", "Status"]
 LAB_COLS = ["Category", "Number", "From", "To", "Idle hours"]
-MAT_COLS = ["Material", "Total quantity delivered"]
+MAT_COLS = ["Material", "Quantity", "Unit"]
 VEH_COLS = ["Vehicle reg. no.", "Assigned", "Insurance status", "Daily condition", "Remarks"]
 STAFF_COLS = ["Team", "Activity"]
 RAIN_COLS = ["Location", "Rainfall (mm)"]
 
 TABLE_COLS = {"activities": ACT_COLS, "equipment": EQ_COLS, "labour": LAB_COLS, "materials": MAT_COLS,
               "vehicles": VEH_COLS, "staff": STAFF_COLS, "rainfall": RAIN_COLS}
-NUMERIC_COLS = {"Previous (m)", "Today (m)", "Qty", "Idle hours", "Number", "Rainfall (mm)"}
+NUMERIC_COLS = {"Previous (m)", "Today (m)", "Qty", "Idle hours", "Number", "Rainfall (mm)", "Quantity"}
 
 START, END = "8:00 am", "5:00 pm"
 NO_DELAYS = "There were no delays."
+
+
+def fmt_chainage(m):
+    """2260 -> '2+260'."""
+    m = int(round(m))
+    return f"{m // 1000}+{m % 1000:03d}"
+
+
+def chainage_options(length_m, extra=()):
+    """0+000, 0+020, ... up to the road length (the end is added if it is not a multiple of the step),
+    plus any chainages typed by hand, in order."""
+    vals = set()
+    if length_m and length_m > 0:
+        n = int(length_m) // CHAINAGE_STEP
+        vals.update(i * CHAINAGE_STEP for i in range(n + 1))
+        vals.add(int(length_m))
+    out = {fmt_chainage(v): v for v in vals}
+    for e in extra:
+        m = chainage_m(e)
+        if m is not None and e not in out:
+            out[e] = m
+    return [k for k, _ in sorted(out.items(), key=lambda kv: (kv[1], kv[0]))]
+
+
+def caption_text(op, frm, to, side):
+    """'Subbase stabilization 2+260 to 2+660 RHS' - the operation merged with its chainages."""
+    ch = f"{frm} to {to}" if (frm and to) else (frm or to or "")
+    return " ".join(x for x in (op, ch, side) if x).strip()
 
 
 def empty_df(name, rows=1):
@@ -71,7 +111,7 @@ def default_labour():
 
 
 def default_vehicles():
-    return _df("vehicles", [["", "", "", "", ""]] * 3)
+    return _df("vehicles", [["KDV 984 M", "Field", "Updated", "Good", "Working"], ["", "", "", "", ""], ["", "", "", "", ""]])
 
 
 def default_staff():
@@ -82,10 +122,10 @@ def default_state():
     """Everything the form holds, as plain values (dates as date objects, tables as DataFrames)."""
     return {
         "project": "", "contract_no": "", "contractor": "",
-        "date": datetime.date.today(),
-        "station_from": "", "station_to": "",
+        "date": datetime.date.today(), "road_length": None,
+        "station_from": None, "station_to": None,
         "morning": "Sunny", "afternoon": "Sunny", "ground": "Good", "tmax": None, "tmin": None,
-        "rainfall": empty_df("rainfall", 0),
+        "rainfall": _df("rainfall", [[loc, 0.0] for loc in RAIN_LOCATIONS]),
         "activities": empty_df("activities", 1),
         "equipment": default_equipment(),
         "visitors": "Nil",
@@ -149,6 +189,7 @@ def activity_rows(df):
         frm = "" if is_blank(r["Chainage from"]) else str(r["Chainage from"]).strip()
         to = "" if is_blank(r["Chainage to"]) else str(r["Chainage to"]).strip()
         remark = "" if is_blank(r["Remark / status"]) else str(r["Remark / status"]).strip()
+        side = "" if is_blank(r["Side"]) else str(r["Side"]).strip()
         if not (op or frm or to or remark or not is_blank(r["Previous (m)"]) or not is_blank(r["Today (m)"])):
             continue                                                  # completely empty row
         prev, today = to_float(r["Previous (m)"]), to_float(r["Today (m)"])
@@ -160,8 +201,11 @@ def activity_rows(df):
         total = None
         if prev is not None or today is not None:
             total = (prev or 0) + (today or 0)
-        out.append({"op": op, "from": frm, "to": to, "prev": prev, "today": today, "total": total,
-                    "remark": remark, "auto": auto})
+        out.append({"op": op, "from": frm, "to": to, "side": side, "prev": prev, "today": today, "total": total,
+                    "remark": remark, "auto": auto,
+                    "from_txt": f"{frm} {side}".strip() if frm else "",      # chainage + RHS / LHS in one cell
+                    "to_txt": f"{to} {side}".strip() if to else "",
+                    "caption": caption_text(op, frm, to, side)})
     return out
 
 
@@ -185,7 +229,7 @@ def to_json(state):
             d[k] = v.isoformat()
         else:
             d[k] = v
-    d["_app"], d["_v"] = "kerra-daily-report", 1
+    d["_app"], d["_v"] = "kerra-daily-report", 2
     return json.dumps(d, indent=1)
 
 
@@ -200,6 +244,8 @@ def from_json(text):
         if isinstance(base, pd.DataFrame):
             cols = TABLE_COLS[k]
             st[k] = _df(k, [[row.get(c) for c in cols] for row in d[k]]) if d[k] else empty_df(k, 0)
+            if k == "rainfall" and not d[k]:
+                st[k] = _df(k, [[loc, 0.0] for loc in RAIN_LOCATIONS])
         elif k == "date":
             st[k] = datetime.date.fromisoformat(d[k])
         else:
@@ -211,13 +257,13 @@ def carry_forward(st):
     """Tomorrow's report: same project, plant, labour, vehicles and teams; previous length = old total;
     weather, rainfall, today's work, deliveries, delays and notes are cleared."""
     n = default_state()
-    for k in ("project", "contract_no", "contractor", "equipment", "labour", "vehicles"):
+    for k in ("project", "contract_no", "contractor", "road_length", "equipment", "labour", "vehicles"):
         n[k] = st[k]
     n["date"] = st["date"] + datetime.timedelta(days=1)
     rows = []
     for a in activity_rows(st["activities"]):
         if a["op"]:
-            rows.append([a["op"], "", "", a["total"], None, ""])
+            rows.append([a["op"], None, None, None, a["total"], None, ""])
     n["activities"] = _df("activities", rows) if rows else empty_df("activities", 1)
     n["staff"] = _df("staff", [[t, ""] for t in st["staff"]["Team"]]) if len(st["staff"]) else default_staff()
     return n
@@ -230,3 +276,28 @@ def totals(st):
     lab = sum(to_float(r[1]) or 0 for r in clean_rows(st["labour"]))
     return {"equipment_units": int(qty), "workers": int(lab),
             "idle_equipment": sum(1 for r in eq if (to_float(r[5]) or 0) > 0)}
+
+
+# ------------------------------------------------------------------ dropdown lists that grow
+def load_lists(path):
+    """The growing dropdown lists: the built-in values plus anything saved earlier in lists.json."""
+    lists = {k: list(v) for k, v in GROWING_LISTS.items()}
+    try:
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f)
+        for k in lists:
+            for v in saved.get(k, []):
+                if v not in lists[k]:
+                    lists[k].append(v)
+    except (OSError, ValueError):
+        pass
+    return lists
+
+
+def save_lists(path, lists):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(lists, f, indent=1, ensure_ascii=False)
+        return True
+    except OSError:
+        return False
